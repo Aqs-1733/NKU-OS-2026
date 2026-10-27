@@ -21,6 +21,12 @@ static void print_ticks() {
 #endif
 }
 
+/* RISC-V compressed instructions have low bits other than 0b11. */
+static size_t trap_instruction_length(uintptr_t epc) {
+    const volatile uint16_t *instruction = (const volatile uint16_t *)epc;
+    return ((*instruction & 0x3) == 0x3) ? 4 : 2;
+}
+
 /* idt_init - initialize IDT to each of the entry points in kern/trap/vectors.S
  */
 void idt_init(void) {
@@ -171,10 +177,6 @@ void interrupt_handler(struct trapframe *tf) {
 
 void exception_handler(struct trapframe *tf) {
     switch (tf->cause) {
-        case CAUSE_MISALIGNED_FETCH:
-            break;
-        case CAUSE_FAULT_FETCH:
-            break;
         case CAUSE_ILLEGAL_INSTRUCTION:
              // 非法指令异常处理
              /* LAB3 CHALLENGE3   YOUR CODE :  2313508*/
@@ -183,8 +185,8 @@ void exception_handler(struct trapframe *tf) {
              *(3)更新 tf->epc寄存器
             */
             cprintf("Exception: Illegal instruction\n");
-            cprintf("  Bad instruction address: 0x%08x\n", tf->epc);
-            tf->epc += 4; //跳过非法指令
+            cprintf("  Bad instruction address: 0x%016llx\n", (unsigned long long)tf->epc);
+            tf->epc += trap_instruction_length(tf->epc); //跳过触发异常的指令
             break;
         case CAUSE_BREAKPOINT:
             //断点异常处理
@@ -194,25 +196,19 @@ void exception_handler(struct trapframe *tf) {
              *(3)更新 tf->epc寄存器
             */
             cprintf("Exception: Breakpoint\n");
-            cprintf("  Bad instruction address: 0x%08x\n", tf->epc);
-            tf->epc += 4; //跳过断点指令
+            cprintf("  Bad instruction address: 0x%016llx\n", (unsigned long long)tf->epc);
+            tf->epc += trap_instruction_length(tf->epc); //跳过触发断点的指令
             break;
+        case CAUSE_MISALIGNED_FETCH:
+        case CAUSE_FAULT_FETCH:
         case CAUSE_MISALIGNED_LOAD:
-            break;
         case CAUSE_FAULT_LOAD:
-            break;
         case CAUSE_MISALIGNED_STORE:
-            break;
         case CAUSE_FAULT_STORE:
-            break;
         case CAUSE_USER_ECALL:
-            break;
         case CAUSE_SUPERVISOR_ECALL:
-            break;
         case CAUSE_HYPERVISOR_ECALL:
-            break;
         case CAUSE_MACHINE_ECALL:
-            break;
         default:
             print_trapframe(tf);
             break;

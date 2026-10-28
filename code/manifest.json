@@ -1,0 +1,14 @@
+{
+  "capture_date": "2026-10-27",
+  "guide_source": "http://oslab.mobisys.top/lab2026/_book/",
+  "guide_source_capture": "existing local course-site capture dated 2026-10-13",
+  "guide_html_page_count": 12,
+  "guide_file_count": 37,
+  "code_source": "https://github.com/du-zeqi666/2025_nankai_os.git",
+  "code_commit": "5637551fdaadc0ef13728217f508306fe2068595",
+  "code_path_in_source": "实验/Lab3/练习1：完善中断处理/code/lab3",
+  "source_file_count": 52,
+  "supplemental_files": [
+    "supplemental/challenge3_trap.c"
+  ]
+}

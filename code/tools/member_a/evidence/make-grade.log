@@ -1,0 +1,12 @@
+$ make grade QEMU=/home/mcz/riscv/qemu-4.1.1/bin/qemu-system-riscv64
+>>>>>>>>>> here_make>>>>>>>>>>>
+gmake[1]: Entering directory '/mnt/c/Users/14021/Documents/Codex/2026-09-20/os-ai-agent-sudo-api-key/work/course-code-download/extracted/lab3_new' + cc kern/init/entry.S + cc kern/init/init.c + cc kern/libs/stdio.c + cc kern/debug/kdebug.c + cc kern/debug/kmonitor.c + cc kern/debug/panic.c + cc kern/driver/clock.c + cc kern/driver/console.c + cc kern/driver/dtb.c + cc kern/driver/intr.c + cc kern/trap/trap.c + cc kern/trap/trapentry.S + cc kern/mm/best_fit_pmm.c + cc kern/mm/default_pmm.c + cc kern/mm/pmm.c + cc libs/printfmt.c + cc libs/readline.c + cc libs/sbi.c + cc libs/string.c + ld bin/kernel riscv64-unknown-elf-objcopy bin/kernel --strip-all -O binary bin/ucore.img gmake[1]: Leaving directory '/mnt/c/Users/14021/Documents/Codex/2026-09-20/os-ai-agent-sudo-api-key/work/course-code-download/extracted/lab3_new'
+>>>>>>>>>> here_make>>>>>>>>>>>
+<<<<<<<<<<<<<<< here_run_qemu <<<<<<<<<<<<<<<<<<
+try to run qemu
+qemu pid=816
+<<<<<<<<<<<<<<< here_run_check <<<<<<<<<<<<<<<<<<
+  -check physical_memory_map_information:    OK
+  -check_best_fit:                           OK
+  -check ticks:                              OK
+Total Score: 30/30

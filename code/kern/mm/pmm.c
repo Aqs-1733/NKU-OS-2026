@@ -88,6 +88,60 @@ size_t nr_free_pages(void)
 }
 
 //lab2 请补充你在lab2中的代码
+/* Inherit the lab3 page_init implementation; derive physical limits from
+ * Lab4's own memory layout rather than copying the older layout/header.
+ */
+static void page_init(void)
+{
+    extern char end[];
+    va_pa_offset = PHYSICAL_MEMORY_OFFSET;
+    const uintptr_t kernel_begin = KERNBASE - PHYSICAL_MEMORY_OFFSET;
+    const uintptr_t mapped_end = KERNTOP - PHYSICAL_MEMORY_OFFSET;
+    uint64_t mem_begin = get_memory_base();
+    uint64_t mem_size = get_memory_size();
+    if (mem_size == 0 || mem_begin < DRAM_BASE ||
+        mem_begin > kernel_begin || mem_size > ~(uint64_t)0 - mem_begin)
+    {
+        panic("page_init: invalid DTB memory range");
+    }
+    uint64_t mem_end = mem_begin + mem_size;
+    cprintf("physcial memory map:\n");
+    cprintf("  memory: 0x%016lx, [0x%016lx, 0x%016lx].\n",
+            mem_size, mem_begin, mem_end - 1);
+
+    uintptr_t maxpa = mem_end < mapped_end ? mem_end : mapped_end;
+    maxpa = ROUNDDOWN(maxpa, PGSIZE);
+    uintptr_t kernel_end = PADDR((uintptr_t)end);
+    if (kernel_end < kernel_begin || kernel_end >= maxpa)
+    {
+        panic("page_init: memory does not contain the kernel");
+    }
+    /* npage is the exclusive physical PPN bound; pages[] starts at nbase. */
+    npage = maxpa / PGSIZE;
+    size_t count = npage - nbase;
+    uintptr_t pages_pa = ROUNDUP(kernel_end, PGSIZE);
+    if (pages_pa > maxpa || count > (maxpa - pages_pa) / sizeof(struct Page))
+    {
+        panic("page_init: no room for page descriptors");
+    }
+    pages = (struct Page *)(pages_pa + va_pa_offset);
+    for (size_t i = 0; i < count; i++)
+    {
+        pages[i].flags = 0;
+        SetPageReserved(&pages[i]);
+        pages[i].property = 0;
+        set_page_ref(&pages[i], 0);
+        list_init(&pages[i].page_link);
+        /* These fields are present in the Lab4 Page, not the older Page. */
+        list_init(&pages[i].pra_page_link);
+        pages[i].pra_vaddr = 0;
+    }
+    uintptr_t free_start = ROUNDUP(pages_pa + count * sizeof(struct Page), PGSIZE);
+    if (free_start < maxpa)
+    {
+        init_memmap(pa2page(free_start), (maxpa - free_start) / PGSIZE);
+    }
+}
 
 static void enable_paging(void)
 {

@@ -18,7 +18,9 @@
 
 ## 代码来源与完整性
 
-- `source/lab4.zip` 是输入 ZIP 的原样副本。将其 `lab4_new/` 顶层目录映射为本分支 `code/`，68 个普通文件逐字节保留，源码注释和换行没有改写。
+**当前状态：前置迁移已完成。** 详见 [迁移与实测记录](prerequisite-migration.md)。下面的 ZIP / PDF 原件信息继续有效；当前 `code/` 中 5 个文件有受清单记录的适配，其他 63 个文件与 ZIP 完全一致。
+
+- `source/lab4.zip` 是输入 ZIP 的原样副本。首次导入时将其 `lab4_new/` 顶层目录映射为本分支 `code/`，68 个普通文件逐字节保留；随后按用户要求迁移前置实现，差异记录于 `source/migration-manifest.json`。
 - ZIP SHA-256：`7a92f243f88ca9a4ec78b52e554a14d78a41bbf6a79a1275f6cc929aaebceba2`。
 - PDF SHA-256：`7623f70663d35b84f38aeb05322d8a725d71738826c35ac081698d4be4f90a75`。
 - `source/manifest.json` 记录附件字节数、摘要、代码文件数和分支基点；`crawl-manifest.json` 记录逐页 URL、正文摘要、原始响应摘要、资源摘要及 HTTP 状态。
@@ -28,7 +30,7 @@
 执行 `python tools/verify_lab4_import.py`，退出状态 0：
 
 ```text
-CODE_OK files=68 changed=0 missing=0 extra=0
+CODE_OK files=68 migrated=5 unchanged=63 missing=0 extra=0
 GUIDE_OK pages=16 assets=20 failed=0 text=identical codeblocks=9 tables=1 images=1
 REQUIREMENTS_OK modules=3 functions=12 challenge=2 report_items=7
 ```
@@ -36,6 +38,8 @@ REQUIREMENTS_OK modules=3 functions=12 challenge=2 report_items=7
 验证器将所有原始章节的文字与离线合并版逐章对比，并检查代码块原样保留、资源存在及所有已归档响应的 SHA-256；Markdown 章节和完整要求另行核对。
 
 ## 起始代码的构建状态
+
+本节保留**迁移前**的原始附件诊断。当前已消除以下 Lab3 处理函数缺失；迁移后的实测和剩余 Lab4 链接缺口以 [迁移记录](prerequisite-migration.md) 为准。
 
 使用现有 WSL Ubuntu 环境及 `/home/lenovo/riscv-elf-toolchains/bin/riscv64-unknown-elf-gcc`（15.1.0），在原始 ZIP 的独立解压副本和导入后的 `code/` 分别执行 `make`，两次 `make` 退出状态都是 **2**，完整构建输出逐字节一致。首先报错：
 
@@ -45,7 +49,7 @@ kern/trap/trap.c:107:9: error: implicit declaration of function 'exception_handl
 make: *** [Makefile:120: obj/kern/trap/trap.o] Error 1
 ```
 
-这里是起始代码的 Lab3 待补部分，不是导入差异。未运行依赖成功构建的 QEMU / 评分，不宣称实验已通过。后续应先按手册补全前置功能，再完成 Lab4 的 12 个函数，最后进行运行和评分验证。
+这里是起始代码的 Lab3 待补部分，不是初次导入差异。初次导入阶段没有运行 QEMU / 评分；本次前置迁移已运行独立专项 QEMU 测试，但完整 Lab4 仍待实现及评分验证。
 
 ## 更新归档
 

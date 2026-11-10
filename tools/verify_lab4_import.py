@@ -28,6 +28,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--code-dir", type=Path, default=ROOT / "code")
     p.add_argument("--code-only", action="store_true")
+    p.add_argument("--starter-only", action="store_true", help="Compare against ZIP only, before prerequisite migration")
     args = p.parse_args()
     source = ROOT / "docs/lab4/source"
     with zipfile.ZipFile(source / "lab4.zip") as z:
@@ -35,10 +36,22 @@ def main():
                     for i in z.infolist() if not i.is_dir()}
     actual = {f.relative_to(args.code_dir).as_posix(): f.read_bytes() for f in args.code_dir.rglob("*")
               if f.is_file() and f.relative_to(args.code_dir).parts[0] not in ("bin", "obj", "build")}
+    migrated = 0
+    migration_file = source / "migration-manifest.json"
+    if migration_file.exists() and not args.starter_only:
+        migration = json.loads(migration_file.read_text(encoding="utf-8"))
+        for rel, item in migration["code_changes"].items():
+            assert hashlib.sha256(expected[rel]).hexdigest() == item["starter_sha256"], (rel, "starter hash")
+            assert rel in actual and hashlib.sha256(actual[rel]).hexdigest() == item["migrated_sha256"], (rel, "migration hash")
+            expected[rel] = actual[rel]
+            migrated += 1
     missing, extra = set(expected) - set(actual), set(actual) - set(expected)
     changed = {k for k in expected.keys() & actual.keys() if expected[k] != actual[k]}
     assert not (missing or extra or changed), (sorted(missing), sorted(extra), sorted(changed))
-    print(f"CODE_OK files={len(expected)} changed=0 missing=0 extra=0")
+    if migrated:
+        print(f"CODE_OK files={len(expected)} migrated={migrated} unchanged={len(expected)-migrated} missing=0 extra=0")
+    else:
+        print(f"CODE_OK files={len(expected)} changed=0 missing=0 extra=0")
     if args.code_only:
         return
     for name, item in json.loads((source / "manifest.json").read_text(encoding="utf-8")).items():

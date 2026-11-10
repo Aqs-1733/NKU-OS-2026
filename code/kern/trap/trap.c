@@ -84,6 +84,62 @@ void print_regs(struct pushregs *gpr)
 extern struct mm_struct *check_mm_struct;
 
 //lab3 请补充你在lab3中的代码
+/* Migrate Lab3 trap handling without its demonstration-only auto shutdown.
+ * Keep Lab4's existing idt_init, SSTATUS_SUM and trap dispatch unchanged.
+ */
+static size_t trap_instruction_length(uintptr_t epc)
+{
+    const volatile uint16_t *instruction = (const volatile uint16_t *)epc;
+    return ((*instruction & 0x3) == 0x3) ? 4 : 2;
+}
+
+static const char *const irq_level[] = {"User", "Supervisor", "Hypervisor", "Machine"};
+static const char *const irq_type[] = {"software", "timer", "external"};
+
+void interrupt_handler(struct trapframe *tf)
+{
+    intptr_t cause = (tf->cause << 1) >> 1;
+    switch (cause)
+    {
+    case IRQ_U_SOFT: case IRQ_S_SOFT: case IRQ_H_SOFT: case IRQ_M_SOFT:
+    case IRQ_U_TIMER:                 case IRQ_H_TIMER: case IRQ_M_TIMER:
+    case IRQ_U_EXT:  case IRQ_S_EXT:  case IRQ_H_EXT:  case IRQ_M_EXT:
+        cprintf("%s %s interrupt\n", irq_level[cause & 3], irq_type[cause >> 2]);
+        break;
+    case IRQ_S_TIMER:
+        clock_set_next_event();
+        ticks++;
+        if (ticks % TICK_NUM == 0)
+        {
+            print_ticks();
+        }
+        /* An interrupt resumes the interrupted instruction; do not skip epc. */
+        break;
+    default:
+        print_trapframe(tf);
+        break;
+    }
+}
+
+void exception_handler(struct trapframe *tf)
+{
+    switch (tf->cause)
+    {
+    case CAUSE_ILLEGAL_INSTRUCTION:
+        cprintf("Exception: Illegal instruction\n");
+        cprintf("  Bad instruction address: 0x%016llx\n", (unsigned long long)tf->epc);
+        tf->epc += trap_instruction_length(tf->epc);
+        break;
+    case CAUSE_BREAKPOINT:
+        cprintf("Exception: Breakpoint\n");
+        cprintf("  Bad instruction address: 0x%016llx\n", (unsigned long long)tf->epc);
+        tf->epc += trap_instruction_length(tf->epc);
+        break;
+    default:
+        print_trapframe(tf);
+        break;
+    }
+}
 
 
 

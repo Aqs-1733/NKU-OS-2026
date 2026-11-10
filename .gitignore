@@ -6,6 +6,7 @@
 # Generated directories
 obj/
 build/
+bin/
 
 # Logs
 *.log

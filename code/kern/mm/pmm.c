@@ -275,6 +275,73 @@ struct Page *get_page(pde_t *pgdir, uintptr_t la, pte_t **ptep_store)
 }
 
 //LAB4 function1 YOUR CODE
+static void page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep)
+{
+    if (*ptep & PTE_V)
+    {
+        struct Page *page = pte2page(*ptep);
+        *ptep = 0;
+        tlb_invalidate(pgdir, la);
+        if (page_ref_dec(page) == 0)
+        {
+            free_page(page);
+        }
+    }
+}
+
+int page_insert(pde_t *pgdir, struct Page *page, uintptr_t la, uint32_t perm)
+{
+    pde_t *pdep1 = &pgdir[PDX1(la)];
+    pde_t old_pde1 = *pdep1;
+    pte_t *ptep = get_pte(pgdir, la, 1);
+    if (ptep == NULL)
+    {
+        /* get_pte can allocate the first table, then fail on the second.
+         * Roll back only that newly created, still-empty Sv39 table.
+         */
+        if (!(old_pde1 & PTE_V) && (*pdep1 & PTE_V))
+        {
+            struct Page *table = pde2page(*pdep1);
+            *pdep1 = old_pde1;
+            /* A non-leaf entry changed; invalidate all page-walk levels. */
+            flush_tlb();
+            if (page_ref_dec(table) == 0)
+            {
+                free_page(table);
+            }
+        }
+        return -E_NO_MEM;
+    }
+
+    /* Hold the new page before removing an old mapping. A same-page
+     * permission update must neither free the page nor add a reference.
+     */
+    page_ref_inc(page);
+    if (*ptep & PTE_V)
+    {
+        if (pte2page(*ptep) == page)
+        {
+            page_ref_dec(page);
+        }
+        else
+        {
+            page_remove_pte(pgdir, la, ptep);
+        }
+    }
+    *ptep = pte_create(page2ppn(page), perm);
+    /* get_pte may have installed non-leaf entries as well as this leaf. */
+    flush_tlb();
+    return 0;
+}
+
+void page_remove(pde_t *pgdir, uintptr_t la)
+{
+    pte_t *ptep = get_pte(pgdir, la, 0);
+    if (ptep != NULL)
+    {
+        page_remove_pte(pgdir, la, ptep);
+    }
+}
 
 
 

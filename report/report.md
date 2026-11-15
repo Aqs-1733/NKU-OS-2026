@@ -373,49 +373,59 @@ Requirements：PID 分配、链表/哈希挂接、nr_process 更新及状态转�
 
 #### 模块功能描述
 
-需要实现的函数：
+本模块实现 `cpu_idle`、`schedule`、`proc_run` 和 `switch_to`。线程创建模块准备好 PCB、内核栈和首次运行现场后，`cpu_idle` 检查调度标志，`schedule` 选择线程，`proc_run` 切换当前线程和页表，最后由 `switch_to` 保存、恢复寄存器。
 
-```c
-void cpu_idle(void);
-void proc_run(struct proc_struct *proc);
-void schedule(void);
-void switch_to(struct context *from, struct context *to);
-```
-
-线程创建模块准备 PCB、独立内核栈和首次运行现场后，cpu_idle 检查调度标志，schedule 选择下一个可运行线程，proc_run 切换 current 和页表，switch_to 完成寄存器现场切换。新线程第一次通过预构造的 ra 进入 forkret，再经 forkrets、__trapret 和 sret 到达 kernel_thread_entry。后续已经运行过的线程，则从上次 switch_to 的返回位置继续执行。
+新线程第一次被调度时，经 `forkret -> forkrets -> __trapret -> kernel_thread_entry` 进入线程函数；已经运行过的线程则从上一次 `switch_to` 的返回位置继续执行。首次运行现场由创建模块设置，本模块使用这份现场完成切换。
 
 #### 实现说明
 
-调度选择采用链表顺序查找，从当前节点之后扫描并回环，过滤非就绪状态；没有其他可运行线程时可继续当前线程，没有任何普通就绪线程时选择 idle。它具有轮转选择特点，但未实现时间片管理，不宣称具备抢占式轮转调度。
+`cpu_idle` 在循环中检查 `need_resched`，置位时调用 `schedule`。调度器先清除当前标志，再从当前普通线程之后查找；idle 则从链表头开始。查找时跳过非 `PROC_RUNNABLE` 节点并跨表头回环，只有当前线程可运行时继续运行当前线程，没有普通就绪线程时选择 idle。选中线程的 `runs` 加一，目标与当前不同才执行切换。当前没有时间片抢占，线程通过主动调用调度器让出 CPU。
 
-上下文只保存 ra、sp、s0-s11，因为 switch_to 是按照函数调用约定进入的切换边界。与任意指令处发生的 Trap 不同，调用者已负责跨普通函数调用需要保留的 caller-saved 值。每个字段偏移通过编译期断言与汇编对应；RV64 上结构为 112 字节。
+`proc_run` 在关闭本地中断后保存旧 `current`、更新 `current`，将目标线程的根页表物理地址转换为页号，并设置 Sv39 的 `MODE=8` 后写入 `satp`。由于没有分配 ASID，随后执行 `sfence.vma` 清除旧翻译，再调用 `switch_to`。新旧页表必须保留切换代码及栈所需的内核映射。原线程再次被调度后，才会从这次调用后继续执行并恢复原中断状态。
 
-写 satp 时使用物理页表根的页号并设置 MODE=8；TLB 使用 sfence.vma 失效。切换前后共享内核映射是继续执行切换代码的前提。不能直接把完整物理地址或虚拟地址塞入 satp，也不能使用参数截断为 32 位的 Sv32 遗留接口。
+`switch_to` 保存和加载 `ra`、`sp`、`s0-s11`，最后通过 `ret` 转到目标线程的执行位置。它按普通函数调用约定工作，调用方负责需要跨调用保持的调用者保存寄存器，不需要重复保存完整 Trap 现场。RV64 的 `context` 为 112 字节，编译期断言检查其大小及全部字段偏移，保证与汇编访问位置一致。
 
 #### 最终提示词
 
+按与模块二相同的 `[PROMPT] / [RELY] / [GUARANTEE] / [SPECIFICATION] 四段式整理实现要求。以下为调度实现部分，测试要求见 `prompt.md` 的 C 部分。
+
 ```text
-背景：针对提供的 RV64 Sv39 Lab4 原始源码，实现成员 C 的调度模块。
-范围：仅补 proc.c 的 cpu_idle、proc_run，sched.c 的 schedule 和 switch.S 的 switch_to。保留 B 的创建函数占位，不覆盖原 wakeup_proc。
-约束：context 为 ra/sp/s0-s11；按 ABI 保存恢复，布局必须有编译期检查。pgdir 是物理地址，按 Sv39 构造 satp，不用 Sv32 lsatp。切换关闭并恢复原本地中断状态，切换页表后刷新 TLB。调度从当前之后寻找 runnable，正确回环，允许仅当前 runnable，找不到则使用 idle。保留 LAB4 注释，代码标记学号 2411788。
-验收：实际编译并在本机 QEMU 中运行；不得通过伪造 PASS 代替测试。A/B 未完成时，用明确隔离的测试环境验证 C 的实现，并记录正式整合尚未通过的原因。
+[PROMPT]
+实现 Lab4 的线程调度与上下文切换：cpu_idle、schedule、proc_run 和 switch_to。
+只修改 proc.c 中的调度函数、sched.c 的调度函数及 switch.S，保留线程创建模块和 wakeup_proc。
+
+[RELY]
+以源码中的 proc_struct、context、proc_list、current、idleproc 为准。
+使用 PROC_RUNNABLE、local_intr_save/local_intr_restore、read_csr/write_csr 和 sfence.vma。
+context 包含 ra、sp、s0-s11；pgdir 是页对齐的根页表物理地址。
+参考 pmm.c 的 Sv39 satp 写法，不使用 Sv32 遗留接口 lsatp。
+
+[GUARANTEE]
+void cpu_idle(void);  // 不返回
+void schedule(void);
+void proc_run(struct proc_struct *proc);
+void switch_to(struct context *from, struct context *to);
+
+[SPECIFICATION]
+Pre-Condition：单 hart RV64 Sv39 环境；current、idleproc 和进程链表已初始化。
+目标线程处于 PROC_RUNNABLE，具有有效内核栈和页表；新旧页表均保留切换代码及栈的内核映射。
+Post-Condition：调度后 current、satp 与执行线程一致；旧线程可在再次调度后继续原调用。
+Case 1：idle 从表头查找；普通线程从自身之后查找，并正确跨表头回环。
+Case 2：跳过非就绪线程；仅当前可运行时继续当前线程；无普通就绪线程时选择 idle。
+Case 3：proc_run 的目标等于 current 时不切换；实际切换时保存并恢复原中断状态。
+Requirements：清除当前 need_resched，更新所选线程 runs；切换采用 Sv39 MODE=8 和物理页号，
+写 satp 后执行 sfence.vma。switch_to 按 context 布局保存、加载 ra/sp/s0-s11 后 ret，
+通过编译期断言核对偏移。保留 LAB4 标记，填写学号 2411788。
+Validation：编译后验证调度顺序、回退行为、寄存器保持、中断状态及页表切换；保存运行日志。
 ```
-
-依据上述提示词形成的实现规格：
-
-前提为单 hart RV64 Sv39 内核，PCB、内核栈和内核映射已正确初始化。所有可运行线程的 pgdir 都必须包含切换函数、旧栈及目标栈可用的内核映射；页表根为页对齐物理地址。关本地中断不提供多核互斥。
-
-cpu_idle 不返回，只在 need_resched 为真时调用 schedule。当前采用忙等，不引入 wfi 唤醒顺序和新中断源的额外要求。
-
-schedule 保存并关闭本地 S 态中断，清 current->need_resched。从当前普通线程之后开始查找，遇链表头继续回环；idle 从表头开始。跳过所有非 PROC_RUNNABLE 状态，遍历一圈可选中仍可运行的 current，找不到则回退 idleproc。选中线程 runs 加一，不为此创建 PROC_RUNNING 新状态。只在目标不同于 current 时调用 proc_run，重新得到执行权后恢复原中断状态。
-
-proc_run 的入参非空、可运行且 pgdir 对齐；目标等于 current 时不切换。实际切换期间关闭中断，将旧 current 记为 prev，更新 current，写入 Sv39 satp，执行带 memory 屏障的 sfence.vma，再调用 switch_to。没有分配 ASID，因此采用全局本地 TLB 失效。函数从 switch_to 继续执行时，意味着这个旧线程已被再次调度；此时才恢复该调用栈保存的中断标志。
-
-switch_to 依据 context 的 14 个字段顺序保存旧 ra、sp、s0-s11 并加载新值，最后 ret。普通函数调用 ABI 负责调用者需要跨调用保持的其他值。它不是 Trap 入口，不能照搬 36 槽现场，也不负责 scause、sepc 或调度策略。编译期检查覆盖所有字段偏移和结构大小。
 
 #### 实现迭代过程
 
-本轮先在 M 态隔离环境验证，再补 S 态页表测试和 cpu_idle 路径。测试程序曾因编译器将结构清零转换为 memset 而链接失败，加入原项目 string.c 后解决。GDB 初次读取旧 QEMU 的虚拟 priv 寄存器得到与启动流程不符的值，因此移除该读数，不把它作为特权级证明；S 态入口由测试启动代码设置 MPP=S 后执行 mret 构造。
+首先在 M 态独立环境中检查调度选择和寄存器切换，再加入 S 态页表切换与 `cpu_idle` 调度路径。测试链接实际实现代码，PCB 和线程栈由测试程序准备，因此可以在线程创建模块完成前检查调度模块。
+
+测试程序第一次链接时出现 `memset` 未定义。原因是编译器将结构体清零转换成了 `memset` 调用，而独立测试没有链接该函数。加入项目已有的 `string.c` 后，测试正常运行。
+
+GDB 检查中，QEMU 4.1.1 的虚拟 `priv` 寄存器读数与测试启动流程不符，未采用该读数判断特权级。S 态测试在启动代码中设置 `MPP=S` 后执行 `mret`，随后检查 `satp` 和上下文切换。保存、恢复是否正确则直接比较寄存器与 `context` 中的数值，结果见 5.5。
 
 ### 4.5 Challenge 1：local_intr_save 与 local_intr_restore 如何开关中断
 
@@ -530,7 +540,7 @@ sstatus=0x8000000000046002 SIE=1 SPIE=0 SPP=0
 
 ### 5.5 调度与切换模块测试
 
-QEMU 版本为本机已有 4.1.1。M 态和 S 态独立环境各通过 12 项检查。S 态环境使用三个不同物理页表根，各自提供相同的 RAM/MMIO 恒等映射，验证实际 satp 切换及切换后继续执行。它不验证不同地址空间中具有不同物理目标的映射隔离。
+测试使用 QEMU 4.1.1，同一组 12 项检查分别在 M 态和 S 态独立环境中通过。S 态环境使用三个不同物理页表根，各自提供相同的 RAM/MMIO 恒等映射，验证实际 satp 切换及切换后继续执行。它不验证不同地址空间中具有不同物理目标的映射隔离。
 
 12 项检查为：空表回退 idle、跳过全部非就绪状态、仅当前可运行、三个线程往返并睡眠返回 idle、跨表头顺序、原中断关闭状态保持、s0-s11 哨兵和栈返回、原中断开启状态恢复、嵌套内层恢复、嵌套外层恢复、proc_run(current) 不切换、cpu_idle 触发调度。寄存器哨兵由汇编设置并比较，避免只依赖 C 局部变量被编译器优化后的结果。
 

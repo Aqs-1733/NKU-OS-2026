@@ -1,20 +1,66 @@
 # C 部分提示词与迭代记录
 
-以下为依据本轮任务整理的规格型提示词，用于复现和说明实现约束，不作为历史逐字对话原文。
+以下按四段式整理调度模块开发时的需求与验收约束，供复现和说明设计使用，不是逐字对话记录。
 
-## 调度实现提示词
-
-```text
-背景：针对提供的 RV64 Sv39 Lab4 原始源码，实现成员 C 的调度模块。
-范围：仅补 proc.c 的 cpu_idle、proc_run，sched.c 的 schedule 和 switch.S 的 switch_to。保留 B 的创建函数占位，不覆盖原 wakeup_proc。
-约束：context 为 ra/sp/s0-s11；按 ABI 保存恢复，布局必须有编译期检查。pgdir 是物理地址，按 Sv39 构造 satp，不用 Sv32 lsatp。切换关闭并恢复原本地中断状态，切换页表后刷新 TLB。调度从当前之后寻找 runnable，正确回环，允许仅当前 runnable，找不到则使用 idle。保留 LAB4 注释，代码标记学号 2411788。
-验收：实际编译并在本机 QEMU 中运行；不得通过伪造 PASS 代替测试。A/B 未完成时，用明确隔离的测试环境验证 C 的实现，并记录正式整合尚未通过的原因。
-```
-
-## 测试与调试提示词
+## 调度与上下文切换
 
 ```text
-为上述实际源文件建立独立 RV64 运行测试。静态 PCB、栈与测试页表必须放在生产源码之外，不能冒充 A/B 的最终实现。覆盖空链表、非就绪线程、回环选择、多个线程主动让出并恢复、中断初始开/关及嵌套恢复、全部 s0-s11 的哨兵保持和 cpu_idle 的调度路径。补充 S 态及有效 Sv39 页表测试，使用 GDB 单步核对 switch_to 保存与加载的 SP/RA。保留真实日志，并明确尚未覆盖的首次启动链与正式评分。
+[PROMPT]
+实现 Lab4 的线程调度与上下文切换：cpu_idle、schedule、proc_run 和 switch_to。
+只修改 proc.c 中的调度函数、sched.c 的调度函数及 switch.S，保留线程创建模块和 wakeup_proc。
+
+[RELY]
+以源码中的 proc_struct、context、proc_list、current、idleproc 为准。
+使用 PROC_RUNNABLE、local_intr_save/local_intr_restore、read_csr/write_csr 和 sfence.vma。
+context 包含 ra、sp、s0-s11；pgdir 是页对齐的根页表物理地址。
+参考 pmm.c 的 Sv39 satp 写法，不使用 Sv32 遗留接口 lsatp。
+
+[GUARANTEE]
+void cpu_idle(void);  // 不返回
+void schedule(void);
+void proc_run(struct proc_struct *proc);
+void switch_to(struct context *from, struct context *to);
+
+[SPECIFICATION]
+Pre-Condition：单 hart RV64 Sv39 环境；current、idleproc 和进程链表已初始化。
+目标线程处于 PROC_RUNNABLE，具有有效内核栈和页表；新旧页表均保留切换代码及栈的内核映射。
+Post-Condition：调度后 current、satp 与执行线程一致；旧线程可在再次调度后继续原调用。
+Case 1：idle 从表头查找；普通线程从自身之后查找，并正确跨表头回环。
+Case 2：跳过非就绪线程；仅当前可运行时继续当前线程；无普通就绪线程时选择 idle。
+Case 3：proc_run 的目标等于 current 时不切换；实际切换时保存并恢复原中断状态。
+Requirements：清除当前 need_resched，更新所选线程 runs；切换采用 Sv39 MODE=8 和物理页号，
+写 satp 后执行 sfence.vma。switch_to 按 context 布局保存、加载 ra/sp/s0-s11 后 ret，
+通过编译期断言核对偏移。保留 LAB4 标记，填写学号 2411788。
+Validation：编译后验证调度顺序、回退行为、寄存器保持、中断状态及页表切换；保存运行日志。
 ```
 
-本轮先在 M 态隔离环境验证，再补 S 态页表测试和 cpu_idle 路径。测试程序曾因编译器将结构清零转换为 memset 而链接失败，加入原项目 string.c 后解决。GDB 初次读取旧 QEMU 的虚拟 priv 寄存器得到与启动流程不符的值，因此移除该读数，不把它作为特权级证明；S 态入口由测试启动代码设置 MPP=S 后执行 mret 构造。
+## 独立测试与 GDB 验证
+
+```text
+[PROMPT]
+为调度模块建立独立运行测试，并用 GDB 检查上下文保存与恢复。
+
+[RELY]
+链接实际 proc.c、sched.c、switch.S 及必要的项目库函数，使用 QEMU 4.1.1。
+在独立测试目录中准备静态 PCB、线程栈和测试页表，不改动正式创建模块与内核初始化流程。
+
+[GUARANTEE]
+提供可复现的运行脚本、GDB 命令和原始日志，记录每项检查的实际结果。
+
+[SPECIFICATION]
+Pre-Condition：调度代码已能编译；测试线程具有有效栈和初始化的 context。
+Post-Condition：检查通过时，能观察到线程实际运行及恢复；失败时输出对应断言并结束测试。
+Cases：覆盖空链表、非就绪过滤、仅当前可运行、跨表头轮转、多线程往返、cpu_idle 调度、
+中断初始开/关和嵌套恢复、全部 s0-s11 的哨兵保持及 proc_run(current)。
+Requirements：分别在 M 态和带有效 Sv39 页表的 S 态运行；通过 satp 读回检查页表根，
+用 GDB 比较旧 SP/RA 的保存值和目标 SP/RA 的恢复值。
+Validation：独立测试与完整启动、首次线程入口、正式评分分别记录；说明各自覆盖范围。
+```
+
+## 实现过程中的问题
+
+首先在 M 态独立环境中检查调度选择和寄存器切换，再加入 S 态页表切换与 `cpu_idle` 调度路径。测试链接实际实现代码，PCB 和线程栈由测试程序准备，因此可以在线程创建模块完成前检查调度模块。
+
+测试程序第一次链接时出现 `memset` 未定义。原因是编译器将结构体清零转换成了 `memset` 调用，而独立测试没有链接该函数。加入项目已有的 `string.c` 后，测试正常运行。
+
+GDB 检查中，QEMU 4.1.1 的虚拟 `priv` 寄存器读数与测试启动流程不符，未采用该读数判断特权级。S 态测试在启动代码中设置 `MPP=S` 后执行 `mret`，随后检查 `satp` 和上下文切换。保存、恢复是否正确则直接比较寄存器与 `context` 中的数值，结果见 5.5。
